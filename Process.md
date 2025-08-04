@@ -1,0 +1,163 @@
+---
+
+
+---
+
+<h1 id="process-migration-samba-vers-ad">Process Migration Samba vers AD</h1>
+<p>Sources:<br>
+Migration: <a href="https://samba.tranquil.it/doc/fr/samba_advanced_methods/samba_migration_to_ms_domain.html">Trankil.it=&gt;Migrer un domaine Samba vers un domaine Microsoft</a><br>
+Jonction: <a href="https://samba.tranquil.it/doc/fr/samba_advanced_methods/samba_add_windows_active_directory.html#samba-add-windows-active-directory">Microsoft=&gt;# Ajouter un AD Windows dans son domaine Samba</a></p>
+<h2 id="samba">Samba:</h2>
+<h3 id="prérequis">Prérequis:</h3>
+<pre class=" language-cmd"><code class="prism  language-cmd">apt install patch python3-markdown
+</code></pre>
+<p>Vérifier la base de donnée annuaire:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">samba-tool dbcheck --cross-ncs --fix --yes
+</code></pre>
+<blockquote>
+<p>Remarques:<br>
+Il est possible que des erreurs remontent lors de la première commande, il suffit de la relancer une seconde fois.<br>
+Exécuter le script python pour créer les attributs msDS-SDReferenceDomain manquant dans Samba (Procédure Jonction)</p>
+</blockquote>
+<p>Il manque un attribut dans Samba qui va générer des messages d’erreur dans la commande <strong>dcdiag</strong>.<br>
+Pour résoudre le problème, recréer deux attributs <code>msDS-SDReferenceDomain</code> dans la partition <code>cn=configuration</code> qui pointent vers le <code>rootDN</code> de l’Active Directory.<br>
+Pour ce faire, vous pouvez exécuter le script suivant sur le serveur Samba-AD :</p>
+<p>Créer le fichier python:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">nano fix_msDS-SDReferenceDomain.py
+</code></pre>
+<p>Coller le code suivant:</p>
+<pre class=" language-python"><code class="prism  language-python"><span class="token comment"># -*- coding: utf-8 -*-</span>
+<span class="token keyword">from</span> samba<span class="token punctuation">.</span>auth <span class="token keyword">import</span> system_session
+<span class="token keyword">from</span> samba<span class="token punctuation">.</span>credentials <span class="token keyword">import</span> Credentials
+<span class="token keyword">from</span> samba<span class="token punctuation">.</span>samdb <span class="token keyword">import</span> SamDB
+<span class="token keyword">import</span> optparse
+<span class="token keyword">import</span> samba<span class="token punctuation">.</span>getopt <span class="token keyword">as</span> options
+
+parser <span class="token operator">=</span> optparse<span class="token punctuation">.</span>OptionParser<span class="token punctuation">(</span><span class="token string">"/etc/samba/smb.conf"</span><span class="token punctuation">)</span>
+sambaopts <span class="token operator">=</span> options<span class="token punctuation">.</span>SambaOptions<span class="token punctuation">(</span>parser<span class="token punctuation">)</span>
+
+lp <span class="token operator">=</span> sambaopts<span class="token punctuation">.</span>get_loadparm<span class="token punctuation">(</span><span class="token punctuation">)</span>
+domaine <span class="token operator">=</span> sambaopts<span class="token punctuation">.</span>_lp<span class="token punctuation">.</span>get<span class="token punctuation">(</span><span class="token string">'realm'</span><span class="token punctuation">)</span><span class="token punctuation">.</span>lower<span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+creds <span class="token operator">=</span> Credentials<span class="token punctuation">(</span><span class="token punctuation">)</span>
+creds<span class="token punctuation">.</span>guess<span class="token punctuation">(</span>lp<span class="token punctuation">)</span>
+
+samdbloc <span class="token operator">=</span> SamDB<span class="token punctuation">(</span>session_info<span class="token operator">=</span>system_session<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>credentials<span class="token operator">=</span>creds<span class="token punctuation">,</span> lp<span class="token operator">=</span>lp<span class="token punctuation">)</span>
+listdn <span class="token operator">=</span> <span class="token builtin">list</span><span class="token punctuation">(</span>samdbloc<span class="token punctuation">.</span>search<span class="token punctuation">(</span>base<span class="token operator">=</span><span class="token string">'cn=partitions,'</span> <span class="token operator">+</span> <span class="token builtin">str</span><span class="token punctuation">(</span>samdbloc<span class="token punctuation">.</span>get_config_basedn<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">,</span> expression<span class="token operator">=</span><span class="token punctuation">(</span><span class="token string">'(|(dnsroot=ForestDnsZones.%s)(dnsroot=DomainDnsZones.%s))'</span> <span class="token operator">%</span> <span class="token punctuation">(</span>domaine<span class="token punctuation">,</span>domaine<span class="token punctuation">)</span> <span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token keyword">for</span> dn <span class="token keyword">in</span> listdn<span class="token punctuation">:</span>
+    <span class="token keyword">if</span> <span class="token operator">not</span> <span class="token string">'msDS-SDReferenceDomain'</span> <span class="token keyword">in</span> dn <span class="token punctuation">:</span>
+        ldif_data <span class="token operator">=</span> u<span class="token triple-quoted-string string">"""dn: %s
+changetype: modify
+replace: msDS-SDReferenceDomain
+msDS-SDReferenceDomain: %s"""</span> <span class="token operator">%</span> <span class="token punctuation">(</span>dn<span class="token punctuation">[</span><span class="token string">'dn'</span><span class="token punctuation">]</span><span class="token punctuation">,</span><span class="token builtin">str</span><span class="token punctuation">(</span>samdbloc<span class="token punctuation">.</span>get_root_basedn<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+        <span class="token keyword">print</span><span class="token punctuation">(</span>ldif_data<span class="token punctuation">)</span>
+        samdbloc<span class="token punctuation">.</span>modify_ldif<span class="token punctuation">(</span>ldif_data<span class="token punctuation">)</span>
+</code></pre>
+<p>Exécuter le fichier python:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">./fix_msDS-SDReferenceDomain.py
+</code></pre>
+<h2 id="windows">Windows:</h2>
+<ul>
+<li><strong>Prérequis:</strong>
+<ul>
+<li>IP statique</li>
+<li>DNS Principal celui du Samba</li>
+<li>Renommer avant jonction au domaine ou avant promote</li>
+</ul>
+</li>
+</ul>
+<p>Ici sur 2008R2:</p>
+<pre class=" language-powershell"><code class="prism  language-powershell">dcpromo
+</code></pre>
+<ul>
+<li>
+<p><strong>Paramétrage avancé:</strong></p>
+<ul>
+<li>DNS</li>
+<li>Catalogue Global</li>
+<li>Réplication depuis Samba</li>
+</ul>
+</li>
+<li>
+<p><strong>Reboot du serveur puis ouverture d’une session sur le domaine qui soit:</strong></p>
+<ul>
+<li>Admin du domaine</li>
+<li>Admin du Schema</li>
+<li>Admin DNS</li>
+</ul>
+</li>
+</ul>
+<p>Forcer l’activation du répertoire Sysvol sur le MS-AD :<br>
+Dans PowerShell en Admin taper:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "SysvolReady" -Value "1"
+</code></pre>
+<ul>
+<li>Recopier le contenu du  <code>sysvol</code>  depuis le serveur Samba. Pour ce faire, dans un explorateur de fichier, tapez  <code>\\srvads\sysvol\</code>, puis aller dans le dossier correspondant au nom de votre domaine (par exemple  <em>ad.mydomain.lan</em>) et copier  <code>Policies</code>  et  <code>Scripts</code>  dans  <code>C:\windows\SYSVOL\domain</code>  (mais pas le nom de domaine). Après la copie on aura donc ces deux répertoires :
+<ul>
+<li><code>C:\windows\SYSVOL\domain\Policies</code>  ;</li>
+<li><code>C:\windows\SYSVOL\domain\Scripts</code>  ;</li>
+</ul>
+</li>
+</ul>
+<p><strong>Note</strong><br>
+Il y a un lien de  <code>C:\windows\SYSVOL\sysvol\ad.mydomain.lan</code>  vers  <code>C:\windows\SYSVOL\domain</code>.</p>
+<ul>
+<li>Redémarrer le serveur MS-AD :</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">shutdown -r -t 0
+</code></pre>
+<ul>
+<li>
+<p>Inverser les serveurs DNS de la carte réseau. Le premier serveur DNS doit être lui même (<code>127.0.0.1</code>), et en deuxième on indique le serveur Samba-AD (Microsoft fait l’inverse lors de la jonction).</p>
+</li>
+<li>
+<p>Dans la console DNS, changer le redirecteur DNS vers le récurseur du réseau (par défaut Windows met le premier contrôleur de domaine comme récurseur lors de la jonction).<br>
+<strong>Mettre l’AD, puis Samba, puis 1.1.1.1 et 8.8.8.8</strong></p>
+</li>
+<li>
+<p>Modifier ensuite la configuration NTP dans la base de registre du MS-AD :</p>
+</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters" -Name "Type" -Value "NTP"
+</code></pre>
+<ul>
+<li>Puis relancer le service NTP depuis une invite de commande sur le MS-AD :</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">net stop w32time
+net start w32time
+</code></pre>
+<ul>
+<li><strong>Une fois toutes ces étapes passés, si on exécute net share on doit voir les partages:</strong>
+<ul>
+<li>NETLOGON</li>
+<li>SYSVOL</li>
+</ul>
+</li>
+</ul>
+<p><strong>NOTE:</strong><br>
+La GPO “Synchro_Temps_NTP” va poser problème à la dépromote de Samba:<br>
+Modifier pour quelle pointe sur un des AD et non plus sur Samba</p>
+<h2 id="dépromote-de-samba">Dépromote de Samba:</h2>
+<p>Eteindre les services Samba. Toutefois, on maintiendra encore un petit moment <em>oc.addc.epf.oc</em> en fonctionnement pour continuer à bénéficier de la souplesse des commandes <strong>samba-tool</strong> pour certaines opérations ultérieures.</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">systemctl stop samba
+systemctl disable samba
+</code></pre>
+<p>Supprimer le dernier contrôleur de domaine Samba en lançant la commande suivante.<br>
+On pointe l’exécution de la commande sur le MS-AD <em>EPF-AD-2008.epf.oc</em> :</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">samba-tool domain demote --remove-other-dead-server=oc-addc -H ldap://EPF-AD-2008.epf.oc -U Bruno
+</code></pre>
+<p>Vérifier que les rôles FSMO ont été transférés lors du dernier <em>demote</em>. Il restera les rôles <em>DomainDnsZones</em> et <em>ForestDNSZones</em> qui n’auront pas été transférés, on force le transfert :</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">samba-tool fsmo show -H ldap://EPF-AD-2008.epf.oc -U Bruno
+samba-tool fsmo seize --role=all -H ldap://EPF-AD-2008.epf.oc -U Bruno
+</code></pre>
+<ul>
+<li>
+<p>Nettoyer les entrées DNS. Dans une console DNS ouverte sur  <em>EPF-AD-2008.epf.oc</em>  vérifier que les entrées DNS pour  <em>EPF-AD-2008.epf.oc</em>  sont bien toutes présentes (champs A, NS, SRV, CNAME) et supprimer les références DNS à  <em>oc-addc.epf.oc</em>. On corrigera aussi les  <em>GLUE records</em>  (champ de type NS) pour le champ  _<em>msdcs</em>  dans la zone  <em>mydomain.lan</em>  <strong>(pas dans la zone  _<em>msdcs.mydomain.lan</em>).</strong></p>
+</li>
+<li>
+<p>Créer la zone inverse si elle n’existe pas encore puis créer le champ PTR pour  <em>EPF-AD-2008.epf.oc</em>.</p>
+</li>
+</ul>
+<p><strong>Désormais nous avons un domaine full Microsoft avec un seul contrôleur de domaine.</strong></p>
+
