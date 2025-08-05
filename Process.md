@@ -254,4 +254,13 @@ net start w32time
 </li>
 </ul>
 <p><strong>Si tout est bon, on peut éteindre le serveur 2008</strong></p>
+<ul>
+<li><strong>Nettoyer dans cet ordre:</strong>
+<ul>
+<li>ADSI</li>
+<li>Sites et Services Active Directory</li>
+<li>DNS</li>
+</ul>
+</li>
+</ul>
 
