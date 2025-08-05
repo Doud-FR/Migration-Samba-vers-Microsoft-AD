@@ -271,4 +271,88 @@ Actualiser les GPO sur le serveur et un client puis vérifier:</p>
 <pre class=" language-cmd"><code class="prism  language-cmd">w32tm /query /status
 w32tm /query /configuration
 </code></pre>
+<h2 id="migration-fsr-vers-dfsr">Migration FSR vers DFSR</h2>
+<h3 id="vérifier-létat-de-santé-de-lad-avant-de-lancer-la-migration">Vérifier l’état de santé de l’AD avant de lancer la migration</h3>
+<pre class=" language-cmd"><code class="prism  language-cmd">dcdiag /e /test:sysvolcheck /test:advertising
+</code></pre>
+<pre class=" language-cmd"><code class="prism  language-cmd">Diagnostic du serveur d'annuaire
+Exécution de l'installation initiale :
+   Tentative de recherche de serveur associé...
+   Serveur associé : EPF-AD-2012
+   * Forêt AD identifiée.
+   Collecte des informations initiales terminée.
+Exécution des tests initiaux nécessaires
+   Test du serveur : Default-First-Site-Name\EPF-AD-2012
+      Démarrage du test : Connectivity
+         ......................... Le test Connectivity
+          de EPF-AD-2012 a réussi
+Exécution des tests principaux
+   Test du serveur : Default-First-Site-Name\EPF-AD-2012
+      Démarrage du test : Advertising
+         ......................... Le test Advertising
+          de EPF-AD-2012 a réussi
+      Démarrage du test : SysVolCheck
+         ......................... Le test SysVolCheck
+          de EPF-AD-2012 a réussi
+   Exécution de tests de partitions sur ForestDnsZones
+   Exécution de tests de partitions sur DomainDnsZones
+   Exécution de tests de partitions sur Schema
+   Exécution de tests de partitions sur Configuration
+   Exécution de tests de partitions sur epf
+   Exécution de tests d'entreprise sur epf.oc
+</code></pre>
+<p><strong>NOTE:</strong><br>
+Il faut que <strong>tout</strong> soit en <strong>“réussi”</strong> pour lancer la migration</p>
+<ul>
+<li><strong>Si tout est bon, on lance la migration qui se fera par étape:</strong>
+<ul>
+<li>Lancement d’une étape</li>
+<li>Vérification de l’avancé de l’étape</li>
+</ul>
+</li>
+<li><strong>On ne passe pas à l’étape d’après tant que ce n’est pas validé</strong></li>
+</ul>
+<ol>
+<li>Lancement du mode “Préparation”:</li>
+</ol>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /setglobalstate 1
+</code></pre>
+<p>Vérification:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /getmigrationstate
+</code></pre>
+<p><strong>Relancer la commande de temps en temps… Jusqu’à obtenir ceci :</strong></p>
+<pre class=" language-cmd"><code class="prism  language-cmd">C:\Windows\system32&gt;Dfsrmig /getmigrationstate
+Tous les controleurs de domaine ont migre vers l'etat Global (&lt; Prepare &gt;).
+La migration a atteint un etat coherent sur tous les controleurs de domaine.
+Réussi.
+</code></pre>
+<ol start="2">
+<li>Lancement de l’étape “Redirigé”:</li>
+</ol>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /setglobalstate 2
+</code></pre>
+<p>Vérification:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /getmigrationstate
+</code></pre>
+<p><strong>Relancer la commande de temps en temps… Jusqu’à obtenir ceci :</strong></p>
+<pre class=" language-cmd"><code class="prism  language-cmd">C:\Windows\system32&gt;Dfsrmig /getmigrationstate
+Tous les controleurs de domaine ont migre vers l'etat Global (&lt; Redirigé &gt;).
+La migration a atteint un etat coherent sur tous les controleurs de domaine.
+Réussi.
+</code></pre>
+<ol start="3">
+<li>Dernière étape, Retirer FSR et son SYSVOL pour passer sur DFSR:</li>
+</ol>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /setglobalstate 3
+</code></pre>
+<p>Vérification:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">dfsrmig /getmigrationstate
+</code></pre>
+<p><strong>Relancer la commande de temps en temps… Jusqu’à obtenir ceci :</strong></p>
+<pre class=" language-cmd"><code class="prism  language-cmd">C:\Windows\system32&gt;Dfsrmig /getmigrationstate
+Tous les controleurs de domaine ont migre vers l'etat Global (&lt; Eliminé &gt;).
+La migration a atteint un etat coherent sur tous les controleurs de domaine.
+Réussi.
+</code></pre>
+<h3 id="vérifier-que-le-dossier-sysvol-et-renommé-en-sysvol_dfsr">Vérifier que le dossier SYSVOL et renommé en SYSVOL_DFSR</h3>
 
