@@ -147,17 +147,111 @@ systemctl disable samba
 On pointe l’exécution de la commande sur le MS-AD <em>EPF-AD-2008.epf.oc</em> :</p>
 <pre class=" language-cmd"><code class="prism  language-cmd">samba-tool domain demote --remove-other-dead-server=oc-addc -H ldap://EPF-AD-2008.epf.oc -U Bruno
 </code></pre>
+<p>On en profite pour supprimer aussi l’AD EPF-2008R2-2025</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">samba-tool domain demote --remove-other-dead-server=EPF-2008R2-2025 -H ldap://EPF-AD-2008.epf.oc -U Bruno
+</code></pre>
 <p>Vérifier que les rôles FSMO ont été transférés lors du dernier <em>demote</em>. Il restera les rôles <em>DomainDnsZones</em> et <em>ForestDNSZones</em> qui n’auront pas été transférés, on force le transfert :</p>
 <pre class=" language-cmd"><code class="prism  language-cmd">samba-tool fsmo show -H ldap://EPF-AD-2008.epf.oc -U Bruno
 samba-tool fsmo seize --role=all -H ldap://EPF-AD-2008.epf.oc -U Bruno
 </code></pre>
 <ul>
 <li>
-<p>Nettoyer les entrées DNS. Dans une console DNS ouverte sur  <em>EPF-AD-2008.epf.oc</em>  vérifier que les entrées DNS pour  <em>EPF-AD-2008.epf.oc</em>  sont bien toutes présentes (champs A, NS, SRV, CNAME) et supprimer les références DNS à  <em>oc-addc.epf.oc</em>. On corrigera aussi les  <em>GLUE records</em>  (champ de type NS) pour le champ  _<em>msdcs</em>  dans la zone  <em>mydomain.lan</em>  <strong>(pas dans la zone  _<em>msdcs.mydomain.lan</em>).</strong></p>
+<p>Nettoyer les entrées DNS. Dans une console DNS ouverte sur  <em>EPF-AD-2008.epf.oc</em>  vérifier que les entrées DNS pour  <em>EPF-AD-2008.epf.oc</em>  sont bien toutes présentes (champs A, NS, SRV, CNAME) et supprimer les références DNS à  <em>oc-addc.epf.oc</em>. On corrigera aussi les  <em>GLUE records</em>  (champ de type NS) pour le champ  _<em>msdcs</em>  dans la zone  <em>mydomain.lan</em> ainsi que pour la zone <em>msdcs.mydomain.lan</em>.</p>
 </li>
 <li>
 <p>Créer la zone inverse si elle n’existe pas encore puis créer le champ PTR pour  <em>EPF-AD-2008.epf.oc</em>.</p>
 </li>
 </ul>
-<p><strong>Désormais nous avons un domaine full Microsoft avec un seul contrôleur de domaine.</strong></p>
+<p><strong>Désormais nous avons un domaine full Microsoft fonctionnel avec un seul contrôleur de domaine.</strong></p>
+<p><strong>NOTE:</strong></p>
+<blockquote>
+<p>Vérifier la configuration de la carte réseau pour la partie DNS, elle doit pointer sur 127.0.0.1 ou l’IP du serveur lui même et plus sur Samba.</p>
+</blockquote>
+<p><strong>NOTE:</strong></p>
+<blockquote>
+<p>Remarques:<br>
+A ce stade il faut normalement faire un DcDiag et regarder l’état de santé de l’AD et s’il y a des échecs.<br>
+Attention, il se peu que des erreurs antérieures à la migration soient rapporté dans le diag.<br>
+Etant sur un 2008R2 on va trouver des erreurs comme:<br>
+Problème : valeur attendue manquante<br>
+Nom d’attribut de l’objet valeur : frsComputerReferenceBL<br>
+Cette erreur est expliqué ici:<a href="https://learn.microsoft.com/fr-fr/previous-versions/troubleshoot/windows-server/dcdiag-verifyreferences-test-fails">DCDiag VerifyReferences échoue</a></p>
+</blockquote>
+<p><strong>Dans l’idéal, il faut quand même migrer cet AD vers un AD au minimum en 2012 afin de valider la réplication SYSVOL mais surtout pour réinitialiser la partie DFSR</strong></p>
+<h2 id="migration-de-lad-en-2008r2-vers-un-ad-en-2012r2">Migration de l’AD en 2008R2 vers un AD en 2012R2</h2>
+<ul>
+<li><strong>Prérequis:</strong>
+<ul>
+<li>IP statique</li>
+<li>DNS Principal celui de l’AD en 2008R2</li>
+<li>Changer les DNS de 2008Ré pour pointer vers 2012R2</li>
+<li>Renommer avant jonction au domaine ou avant promote</li>
+</ul>
+</li>
+</ul>
+<p>Sur 2012R2 on ajoute le rôle ADDS et DNS<br>
+Une fois le rôle ADDS installé, promouvoir en DC<br>
+Sur  <em>EPF-AD-2008</em>, vérifier la réplication :</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">repadmin /kcc
+repadmin /showrepl
+</code></pre>
+<p>Si tout est à l’état “Réussi” on démromote 2008R2<br>
+Sur la VM Samba:<br>
+Modifier le fichier resolv.conf:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">nano /etc/resolv.conf
+</code></pre>
+<pre class=" language-cmd"><code class="prism  language-cmd">search EPF.OC
+nameserver 10.34.1.226
+</code></pre>
+<p>Puis dépromote de 2008:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">samba-tool domain demote --remove-other-dead-server=EPF-AD-2008 -H ldap://EPF-AD-2012.epf.oc -U Bruno
+</code></pre>
+<p>Vérifier que Samba-Tool à bien migré les roles FSMO à 2012R2</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">netdom query fsmo
+</code></pre>
+<p><strong>Supprimer l’objet EPF-AD-2008 de l’AD depuis la console Utilisateurs et Ordinateurs Active Directory</strong></p>
+<p>Forcer l’activation du répertoire Sysvol sur le MS-AD :<br>
+Dans PowerShell en Admin taper:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "SysvolReady" -Value "1"
+</code></pre>
+<ul>
+<li>Recopier le contenu du  <code>sysvol</code>  depuis le serveur EPF-AD-2008. Pour ce faire, dans un explorateur de fichier, tapez  <code>\\epf-ad-2008\sysvol\</code>, puis aller dans le dossier correspondant au nom de votre domaine (par exemple  <em>epf.oc</em>) et copier  <code>Policies</code>  et  <code>Scripts</code>  dans  <code>C:\windows\SYSVOL\domain</code>  (mais pas le nom de domaine). Après la copie on aura donc ces deux répertoires :
+<ul>
+<li><code>C:\windows\SYSVOL\domain\Policies</code>  ;</li>
+<li><code>C:\windows\SYSVOL\domain\Scripts</code>  ;</li>
+</ul>
+</li>
+</ul>
+<p><strong>Note</strong><br>
+Il y a un lien de  <code>C:\windows\SYSVOL\sysvol\ad.mydomain.lan</code>  vers  <code>C:\windows\SYSVOL\domain</code>.</p>
+<ul>
+<li>Redémarrer le serveur MS-AD :</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">shutdown -r -t 0
+</code></pre>
+<ul>
+<li>
+<p>Changer les serveurs DNS de la carte réseau. Le serveur DNS doit être lui même (<code>127.0.0.1</code>), et en deuxième on laisse vide.</p>
+</li>
+<li>
+<p>Modifier ensuite la configuration NTP dans la base de registre du MS-AD :</p>
+</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters" -Name "Type" -Value "NTP"
+</code></pre>
+<ul>
+<li>Puis relancer le service NTP depuis une invite de commande sur le MS-AD :</li>
+</ul>
+<pre class=" language-cmd"><code class="prism  language-cmd">net stop w32time
+net start w32time
+</code></pre>
+<ul>
+<li><strong>Une fois toutes ces étapes passés, si on exécute net share on doit voir les partages:</strong>
+<ul>
+<li>NETLOGON</li>
+<li>SYSVOL</li>
+</ul>
+</li>
+</ul>
+<p><strong>Si tout est bon, on peut éteindre le serveur 2008</strong></p>
 
