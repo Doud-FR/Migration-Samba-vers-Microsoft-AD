@@ -137,7 +137,8 @@ net start w32time
 </ul>
 <p><strong>NOTE:</strong><br>
 La GPO “Synchro_Temps_NTP” va poser problème à la dépromote de Samba:<br>
-Modifier pour quelle pointe sur un des AD et non plus sur Samba</p>
+Modifier pour quelle pointe sur un des AD et non plus sur Samba<br>
+<strong>On modifiera à la fin du process cette GPO pour qu’elle pointe sur le dernier AD restant</strong></p>
 <h2 id="dépromote-de-samba">Dépromote de Samba:</h2>
 <p>Eteindre les services Samba. Toutefois, on maintiendra encore un petit moment <em>oc.addc.epf.oc</em> en fonctionnement pour continuer à bénéficier de la souplesse des commandes <strong>samba-tool</strong> pour certaines opérations ultérieures.</p>
 <pre class=" language-cmd"><code class="prism  language-cmd">systemctl stop samba
@@ -263,4 +264,11 @@ net start w32time
 </ul>
 </li>
 </ul>
+<p><strong>NOTE:</strong><br>
+La GPO “Synchro_Temps_NTP”:<br>
+Modifier “NtpServer” “10.34.1.227” pour pointer l’ip de l’AD 2012R2<br>
+Actualiser les GPO sur le serveur et un client puis vérifier:</p>
+<pre class=" language-cmd"><code class="prism  language-cmd">w32tm /query /status
+w32tm /query /configuration
+</code></pre>
 
